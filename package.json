@@ -1,12 +1,13 @@
 {
-    "name": "vector-search",
+    "name": "ai-smart-translate-pen",
     "version": "1.0.0",
-    "description": "使用向量搜尋來找到相似的筆記",
+    "description": "AI Smart Translate Pen - 智能翻譯筆",
     "main": "main.js",
     "scripts": {
         "dev": "node esbuild.config.mjs",
         "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-        "version": "node version-bump.mjs && git add manifest.json versions.json"
+        "version": "node version-bump.mjs && git add manifest.json versions.json",
+        "start": "node main.js"
     },
     "keywords": [
         "obsidian",
@@ -26,7 +27,7 @@
         "typescript": "4.8.4"
     },
     "dependencies": {
-        "@google/genai": "^0.13.0",
-        "dotenv": "^16.5.0"
+        "@google/generative-ai": "^0.2.1",
+        "dotenv": "^16.4.5"
     }
 }
