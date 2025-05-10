@@ -44,8 +44,10 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("google").setLevel(logging.WARNING)
 
 from google import genai
+import numpy as np
+import json
 
-from typing import List, Literal
+from typing import List, Literal, Dict
 from pydantic import BaseModel
 
 class RootWord(BaseModel):
@@ -71,7 +73,50 @@ class Word(BaseModel):
 
 class WordList(BaseModel):
     words: List[Word]
-    
+
+class VectorEntry(BaseModel):
+    path: str
+    filename: str
+    vector: list[float]
+
+# 向量儲存路徑
+VECTOR_STORAGE_PATH = r"C:\Users\baihu\OneDrive\Documents\obsidian\.obsidian\plugins\vector-search\vectors.json"
+
+def load_vectors() -> List[VectorEntry]:
+    """載入向量資料"""
+    if os.path.exists(VECTOR_STORAGE_PATH):
+        try:
+            with open(VECTOR_STORAGE_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                # 確保資料是列表格式
+                if not isinstance(data, list):
+                    logger.warning("向量資料格式不正確，將重新初始化")
+                    return []
+                # 驗證每個條目的格式
+                vectors = []
+                for entry in data:
+                    try:
+                        if isinstance(entry, dict) and all(k in entry for k in ['path', 'filename', 'vector']):
+                            vectors.append(VectorEntry(**entry))
+                        else:
+                            logger.warning(f"跳過無效的向量條目: {entry}")
+                    except Exception as e:
+                        logger.warning(f"處理向量條目時發生錯誤: {e}")
+                return vectors
+        except Exception as e:
+            logger.error(f"載入向量資料時發生錯誤: {e}")
+            return []
+    return []
+
+def save_vectors(vectors: List[VectorEntry]):
+    """儲存向量資料"""
+    try:
+        os.makedirs(os.path.dirname(VECTOR_STORAGE_PATH), exist_ok=True)
+        with open(VECTOR_STORAGE_PATH, 'w', encoding='utf-8') as f:
+            json.dump([vector.model_dump() for vector in vectors], f, ensure_ascii=False, indent=2)
+        logger.info("向量資料已成功儲存")
+    except Exception as e:
+        logger.error(f"儲存向量資料時發生錯誤: {e}")
 
 from dotenv import load_dotenv
 import os
@@ -111,7 +156,18 @@ prompt = """
 請確保所有提供的資訊都是準確且與單字的特定含義緊密相關的。
 """
 
-def main(word: str, thinking_budget: int = 1024) -> WordList:
+def get_embedding(text: str) -> list[float]:
+    try:
+        result = client.models.embed_content(
+            model="gemini-embedding-exp-03-07",
+            contents=text
+        )
+        return [float(x) for x in result.embeddings[0].values]
+    except Exception as e:
+        logger.error(f"生成向量失敗: {e}")
+        return []
+
+def main(word: str, thinking_budget: int = 1024) -> str:
     try:
         response = client.models.generate_content(
             model="gemini-2.5-flash-preview-04-17",
@@ -125,7 +181,87 @@ def main(word: str, thinking_budget: int = 1024) -> WordList:
             }
         )
         
-        return response.text
+        word_list = WordList.model_validate_json(response.text)
+        vectors = load_vectors()
+        
+        markdown = []
+        for i, word_obj in enumerate(word_list.words):
+            # 生成向量並儲存
+            embedding = get_embedding(word_obj.English_to_English_Translation)
+            
+            # 建立檔案路徑
+            filename = f"{word.lower()}.md"
+            full_path = f"English/單字/{filename}"
+            
+            # 新增向量條目
+            vectors.append(VectorEntry(
+                path=full_path,
+                filename=word_obj.Traditional_Chinese_Translation,
+                vector=embedding
+            ))
+            
+            # 添加 Obsidian 標籤
+            markdown.append(f"# {word_obj.Traditional_Chinese_Translation}\n\n")
+            
+            # 英文解釋使用 callout
+            markdown.append("> [!NOTE] 英文解釋\n")
+            markdown.append(f"> {word_obj.English_to_English_Translation}\n\n")
+            
+            # 基本資訊區塊
+            markdown.append("## 基本資訊\n\n")
+            markdown.append(f"**詞性**：{word_obj.Part_of_Speech}\n")
+            markdown.append(f"**發音**：`{word_obj.pronunciation}`\n\n")
+            
+            # 詞根資訊
+            if word_obj.root_word:
+                markdown.append("## 詞源分析\n\n")
+                for root in word_obj.root_word:
+                    markdown.append(f"### {root.root}\n")
+                    markdown.append(f"> {root.meaning}\n\n")
+            
+            # 詞彙關係區塊
+            markdown.append("## 詞彙關係\n")
+            
+            if word_obj.synonyms:
+                markdown.append("### 同義詞\n")
+                markdown.append("".join([f"- [[{synonym}]]\n" for synonym in word_obj.synonyms]))
+            
+            if word_obj.antonyms:
+                markdown.append("### 反義詞\n")
+                markdown.append("".join([f"- [[{antonym}]]\n" for antonym in word_obj.antonyms]))
+            
+            if word_obj.collocations:
+                markdown.append("### 搭配詞\n")
+                markdown.append("".join([f"- {collocation}\n" for collocation in word_obj.collocations]))
+            
+            if word_obj.related_words:
+                markdown.append("### 相關詞\n")
+                markdown.append("".join([f"- [[{related_word}]]\n" for related_word in word_obj.related_words]))
+            
+            # 例句區塊
+            if word_obj.examples:
+                markdown.append("## 例句\n\n")
+                for example in word_obj.examples:
+                    markdown.append("> [!example] 例句\n")
+                    markdown.append(f"> {example.sentence}\n")
+                    markdown.append(f"> \n")
+                    markdown.append(f"> {example.translation}\n\n")
+            
+            # 備註區塊
+            if word_obj.notes:
+                markdown.append("## 備註\n\n")
+                for note in word_obj.notes:
+                    markdown.append("> [!tip] 補充說明\n")
+                    markdown.append(f"> {note}\n\n")
+            
+            # 如果不是最後一個單字，才添加分隔線
+            if i < len(word_list.words) - 1:
+                markdown.append("---\n\n")
+        
+        # 儲存更新後的向量
+        save_vectors(vectors)
+        
+        return "".join(markdown)
     
     except Exception as e:
         logger.error(f"調用 Gemini 失敗: {e}")
@@ -135,7 +271,14 @@ if __name__ == "__main__":
     try:
         while True:
             word = input("請輸入要查詢的單字或片語: ")
-            print(main(word))
+            result = main(word)
+            print(result)
+            
+            # 將結果儲存為 .md 檔案
+            filename = f"{word.lower()}.md"
+            with open(f"C:\\Users\\baihu\\OneDrive\\Documents\\obsidian\\English\\單字\\{filename}", "w", encoding="utf-8") as f:
+                f.write(result)
+            logger.info(f"已將結果儲存至 {filename}")
             
     except KeyboardInterrupt:
         logger.info("程式已中止")
