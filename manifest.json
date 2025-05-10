@@ -1,0 +1,10 @@
+{
+    "id": "vector-search",
+    "name": "Vector Search",
+    "version": "1.0.0",
+    "minAppVersion": "0.15.0",
+    "description": "使用向量搜尋來找到相似的筆記",
+    "author": "baihu",
+    "authorUrl": "https://github.com/baihu-fox-8588",
+    "isDesktopOnly": false
+} 
